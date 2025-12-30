@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Attendance Management (Single File)</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body{font-family:system-ui,Segoe UI,Arial;margin:20px;background-color:#f6f8fa}
+    .container{max-width:960px;margin:0 auto;background:rgba(255,255,255,0.5);padding:20px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+    h1,h2{margin-top:0}
+    .row{display:flex;gap:16px}
+    .col{flex:1}
+    input,button,select{padding:8px;margin:6px 0;width:100%;box-sizing:border-box}
+    .small-btn{width:auto;min-width:80px;padding:6px 10px;font-size:.9rem;margin-top:8px;display:inline-block}
+    .hidden{display:none}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{border:1px solid #eee;padding:8px;text-align:left}
+    .muted{color:#666;font-size:.9rem}
+    .success{color:green}
+    .error{color:#c00}
+    small{color:#444}
+    .actions{display:flex;gap:8px}
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Attendance Management System (Single HTML)</h1>
+    
+
+    <div id="auth-area">
+      <div class="row">
+        <div class="col">
+          <h2>Admin Login</h2>
+          <input id="admin-username" placeholder="username">
+          <input id="admin-password" type="password" placeholder="password">
+          <div class="actions">
+            <button id="btn-admin-login">Login</button>
+            <button id="btn-open-create-admin">Create Admin</button>
+          </div>
+          <div id="admin-login-msg"></div>
+        </div>
+        <div class="col">
+          <h2>Student View</h2>
+          <input id="student-usn" placeholder="Enter your USN">
+          <div class="actions">
+            <button id="btn-view-student">View Attendance</button>
+          </div>
+          <div id="student-msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create admin modal area -->
+    <div id="create-admin-area" class="hidden">
+      <h2>Create Admin</h2>
+      <input id="new-admin-username" placeholder="username">
+      <input id="new-admin-password" type="password" placeholder="password">
+      <input id="new-admin-password2" type="password" placeholder="re-enter password">
+      <small>Password must be 8-20 chars, include uppercase, digit and special char (@ # $ ^ & * ( ) . , _)</small>
+      <div class="actions">
+        <button id="btn-create-admin">Create</button>
+        <button id="btn-cancel-create-admin">Cancel</button>
+      </div>
+      <div id="create-admin-msg"></div>
+    </div>
+
+    <!-- Admin panel -->
+    <div id="admin-panel" class="hidden">
+      <h2>Admin Panel</h2>
+      <div class="row">
+        <div class="col">
+          <h3>Add Student</h3>
+          <input id="add-usn" placeholder="USN (unique)">
+          <input id="add-name" placeholder="Name">
+          <button id="btn-add-student">Add Student</button>
+          <div id="add-student-msg"></div>
+
+          <h3>Mark Attendance (Today)</h3>
+          <div id="attendance-list"></div>
+          <button id="btn-save-attendance">Save Attendance</button>
+          <div id="mark-att-msg"></div>
+        </div>
+        <div class="col">
+          <h3>Attendance Summary</h3>
+          <div id="attendance-summary"></div>
+
+          <h3>Student Directory</h3>
+          <div id="student-directory"></div>
+          <div style="margin-top:12px">
+            <button id="btn-export-students">Export Students</button>
+            <button id="btn-import-students">Import Students</button>
+            <input type="file" id="import-students-file" accept=".xlsx,.xls,.csv" class="hidden">
+          </div>
+          <button id="btn-logout">Logout</button>
+          <div style="margin-top:8px">
+            <button id="btn-home" class="hidden small-btn">Home</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Student view area -->
+    <div id="student-panel" class="hidden">
+      <h2>Student Attendance</h2>
+      <div id="student-attendance-data"></div>
+      <button id="btn-back">Back</button>
+    </div>
+
+    <!-- Export/Import functionality removed -->
+
+  </div>
+
+<script>
+// ----------------- Data helpers -----------------
+function read(key){ const s = localStorage.getItem(key); return s ? JSON.parse(s) : null }
+function write(key, val){ localStorage.setItem(key, JSON.stringify(val)) }
+function ensure(){ if(!read('admins')) write('admins', [{username:'admin', password:'admin'}]); if(!read('students')) write('students', []); if(!read('attendance')) write('attendance', []); }
+
+// Password validator (same rules as original)
+function passwordValid(p){ if(p.length < 8 || p.length > 20) return false; let hasUpper=false, hasDigit=false, hasSpecial=false; for(let ch of p){ if(ch >= 'A' && ch <= 'Z') hasUpper=true; if('0123456789'.includes(ch)) hasDigit=true; if('@&_()*#\$\^.,'.includes(ch)) hasSpecial=true; } return hasUpper && hasDigit && hasSpecial }
+
+// ----------------- UI helpers -----------------
+function $(id){return document.getElementById(id)}
+function show(id){ $(id).classList.remove('hidden') }
+function hide(id){ $(id).classList.add('hidden') }
+
+// ----------------- Init -----------------
+ensure();
+
+// ----------------- Admin login -----------------
+$('btn-admin-login').onclick = ()=>{
+  const u = $('admin-username').value.trim(); const p = $('admin-password').value;
+  const admins = read('admins') || [];
+  const ok = admins.find(a=>a.username===u && a.password===p);
+  if(ok){ $('admin-login-msg').innerHTML = '<span class="success">Login successful</span>'; openAdminPanel(); } else { $('admin-login-msg').innerHTML = '<span class="error">Invalid credentials</span>'; }
+}
+
+$('btn-open-create-admin').onclick = ()=>{ show('create-admin-area'); show('btn-home'); }
+$('btn-cancel-create-admin').onclick = ()=>{ hide('create-admin-area'); $('create-admin-msg').innerHTML=''; hide('btn-home'); }
+$('btn-create-admin').onclick = ()=>{
+  const u = $('new-admin-username').value.trim(); const p = $('new-admin-password').value; const p2 = $('new-admin-password2').value;
+  if(!u){ $('create-admin-msg').innerHTML = '<span class="error">Username required</span>'; return }
+  if(p !== p2){ $('create-admin-msg').innerHTML = '<span class="error">Passwords do not match</span>'; return }
+  if(!passwordValid(p)){ $('create-admin-msg').innerHTML = '<span class="error">Password not strong enough</span>'; return }
+  const admins = read('admins') || [];
+  if(admins.find(a=>a.username===u)){ $('create-admin-msg').innerHTML = '<span class="error">Username already exists</span>'; return }
+  admins.push({username:u,password:p}); write('admins', admins); $('create-admin-msg').innerHTML = '<span class="success">Admin created</span>'; setTimeout(()=>{ hide('create-admin-area'); $('create-admin-msg').innerHTML=''; },1000);
+}
+
+// ----------------- Admin panel -----------------
+function openAdminPanel(){ hide('auth-area'); show('admin-panel'); show('btn-home'); renderStudents(); renderAttendanceEditor(); renderSummary(); }
+$('btn-logout').onclick = ()=>{ hide('admin-panel'); show('auth-area'); $('admin-username').value=''; $('admin-password').value=''; hide('btn-home'); }
+
+$('btn-add-student').onclick = ()=>{
+  const usn = $('add-usn').value.trim(); const name = $('add-name').value.trim(); if(!usn||!name){ $('add-student-msg').innerHTML='<span class="error">USN and Name required</span>'; return }
+  const students = read('students') || [];
+  if(students.find(s=>s.usn===usn)){ $('add-student-msg').innerHTML='<span class="error">Student already exists</span>'; return }
+  students.push({usn,name}); write('students', students); $('add-student-msg').innerHTML='<span class="success">Student added</span>'; $('add-usn').value=''; $('add-name').value=''; renderStudents(); renderAttendanceEditor(); renderSummary(); setTimeout(()=>$('add-student-msg').innerHTML='',1200);
+}
+
+function renderStudents(){ const students = read('students')||[]; if(students.length===0) {$('student-directory').innerHTML='<small>No students yet</small>'; return } let html='<table><tr><th>USN</th><th>Name</th></tr>'; for(let s of students){ html += `<tr><td>${s.usn}</td><td>${s.name}</td></tr>` } html += '</table>'; $('student-directory').innerHTML = html }
+
+function renderAttendanceEditor(){ const students = read('students')||[]; const today = (new Date()).toISOString().slice(0,10); if(students.length===0){ $('attendance-list').innerHTML='<small>No students to mark</small>'; return } let html='<table><tr><th>USN</th><th>Name</th><th>Status</th></tr>'; for(let s of students){ html += `<tr><td>${s.usn}</td><td>${s.name}</td><td><select data-usn="${s.usn}"><option value="1">Present</option><option value="0">Absent</option></select></td></tr>` } html += '</table>'; $('attendance-list').innerHTML = html }
+
+$('btn-save-attendance').onclick = ()=>{
+  const sel = document.querySelectorAll('#attendance-list select'); if(sel.length===0){ $('mark-att-msg').innerHTML='<span class="error">No students</span>'; return }
+  const attendance = read('attendance')||[]; const date = (new Date()).toISOString().slice(0,10);
+  for(let s of sel){ const usn = s.dataset.usn; const present = s.value==='1'; // don't duplicate for same date
+    // remove existing entry for same date & usn
+    for(let i=attendance.length-1;i>=0;i--){ if(attendance[i].usn===usn && attendance[i].date===date) attendance.splice(i,1) }
+    attendance.push({usn,date,present}); }
+  write('attendance', attendance); $('mark-att-msg').innerHTML='<span class="success">Attendance saved for '+date+'</span>'; renderSummary(); setTimeout(()=>$('mark-att-msg').innerHTML='',1200);
+}
+
+// ----------------- Attendance summary -----------------
+function renderSummary(){ const students = read('students')||[]; const attendance = read('attendance')||[]; if(students.length===0){ $('attendance-summary').innerHTML='<small>No students</small>'; return }
+  let html='<table><tr><th>USN</th><th>Name</th><th>Present</th><th>Absent</th><th>%</th></tr>';
+  for(let s of students){ const records = attendance.filter(a=>a.usn===s.usn); const total = records.length; const present = records.filter(r=>r.present).length; const absent = total - present; const perc = total===0 ? 0 : Math.round((present/total)*100*100)/100; html += `<tr><td>${s.usn}</td><td>${s.name}</td><td>${present}</td><td>${absent}</td><td>${perc}%</td></tr>` }
+  html += '</table>'; $('attendance-summary').innerHTML = html }
+
+// ----------------- Student View -----------------
+$('btn-view-student').onclick = ()=>{
+  const usn = $('student-usn').value.trim(); if(!usn){ $('student-msg').innerHTML = '<span class="error">Enter USN</span>'; return }
+  const students = read('students')||[]; const st = students.find(s=>s.usn===usn); if(!st){ $('student-msg').innerHTML = '<span class="error">Student not found</span>'; return }
+  $('student-msg').innerHTML = '';
+  showStudentPanel(usn);
+}
+
+function showStudentPanel(usn){ hide('auth-area'); show('student-panel'); show('btn-home'); const attendance = read('attendance')||[]; const rec = attendance.filter(a=>a.usn===usn).sort((a,b)=>b.date.localeCompare(a.date)); let html=`<h3>${usn}</h3>`; if(rec.length===0){ html += '<p>No attendance records</p>' } else { html += '<table><tr><th>Date</th><th>Status</th></tr>'; for(let r of rec){ html += `<tr><td>${r.date}</td><td>${r.present? 'Present':'Absent'}</td></tr>` } html += '</table>' } const present = rec.filter(r=>r.present).length; const total = rec.length; const perc = total===0?0:Math.round((present/total)*10000)/100; html += `<p>Present: ${present} &nbsp; Absent: ${total-present} &nbsp; %: ${perc}%</p>`; $('student-attendance-data').innerHTML = html }
+$('btn-back').onclick = ()=>{ hide('student-panel'); show('auth-area'); $('student-usn').value=''; hide('btn-home'); }
+
+$('btn-home').onclick = ()=>{ hide('admin-panel'); hide('student-panel'); hide('create-admin-area'); show('auth-area'); $('student-usn').value=''; $('admin-username').value=''; $('admin-password').value=''; hide('btn-home'); }
+
+// ----------------- Export / Import -----------------
+// Export students to Excel
+function exportStudentsToExcel(){
+  const students = read('students')||[];
+  if(students.length===0){ alert('No students to export'); return; }
+  const ws = XLSX.utils.json_to_sheet(students);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Students');
+  XLSX.writeFile(wb, 'students.xlsx');
+}
+
+// Import students from file (Excel/CSV). Merges by USN (import overwrites existing same USN)
+function handleImportFile(file){
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const data = new Uint8Array(ev.target.result);
+    const wb = XLSX.read(data, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+    if(!rows || rows.length < 1){ alert('No data found in sheet'); return; }
+    const headers = (rows[0] || []).map(h => String(h||'').trim());
+    const dataRows = rows.slice(1).filter(r => r && r.some(c => String(c||'').trim() !== ''));
+
+    // helper to normalize header text
+    const normalize = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+
+    // known variants
+    const usnVariants = ['usn','roll','rollno','rollnumber','id','studentid','student_id','regno','reg','registration','admissionno','srno'];
+    const nameVariants = ['name','fullname','studentname','student_name','full_name','student','studentname'];
+
+    // build map of normalized header -> index/original
+    const normMap = {};
+    headers.forEach((h,i)=>{ normMap[i] = {orig:h, norm:normalize(h)} });
+
+    let usnIndex = null, nameIndex = null;
+    // first try exact/variant matches
+    for(const i in normMap){ const n = normMap[i].norm; if(!usnIndex && usnVariants.includes(n)) usnIndex = parseInt(i); if(!nameIndex && nameVariants.includes(n)) nameIndex = parseInt(i); }
+
+    // secondary: contains tokens
+    if(usnIndex === null){ for(const i in normMap){ const n = normMap[i].norm; if(!usnIndex && (n.includes('roll') || n.includes('usn') || n.includes('id') || n.includes('reg'))) usnIndex = parseInt(i); } }
+    if(nameIndex === null){ for(const i in normMap){ const n = normMap[i].norm; if(!nameIndex && (n.includes('name') || n.includes('student') || n.includes('full'))) nameIndex = parseInt(i); } }
+
+    // fallback to positional first/second column
+    if(usnIndex === null && headers.length >= 1) usnIndex = 0;
+    if(nameIndex === null && headers.length >= 2) nameIndex = 1;
+
+    const detectedUSN = usnIndex !== null ? headers[usnIndex] : null;
+    const detectedName = nameIndex !== null ? headers[nameIndex] : null;
+
+    // prepare preview (first 5 rows)
+    const preview = dataRows.slice(0,5).map(r => ({ usn: String(r[usnIndex]||'').trim(), name: String(r[nameIndex]||'').trim() }));
+
+    // confirm with user
+    let msg = 'Detected columns:\n';
+    msg += 'USN <- ' + (detectedUSN || ('column ' + (usnIndex+1))) + '\n';
+    msg += 'Name <- ' + (detectedName || ('column ' + (nameIndex+1))) + '\n\n';
+    msg += 'Sample rows (first 5):\n';
+    preview.forEach((p,i)=>{ msg += `${i+1}) ${p.usn}  -  ${p.name}\n`; });
+    msg += '\nProceed with import? (OK = yes, Cancel = no)';
+    if(!confirm(msg)) return;
+
+    // build imported list
+    const imported = [];
+    dataRows.forEach(r=>{
+      const usn = String(r[usnIndex]||'').trim();
+      const name = String(r[nameIndex]||'').trim();
+      if(usn && name) imported.push({usn,name});
+    });
+    if(imported.length===0){ alert('No valid rows found (need USN and Name columns).'); return; }
+
+    const existing = read('students')||[];
+    const map = {};
+    existing.forEach(s=>map[s.usn]=s);
+    let added=0, replaced=0;
+    imported.forEach(s=>{ if(map[s.usn]) replaced++; else added++; map[s.usn]=s });
+    const merged = Object.values(map);
+    write('students', merged);
+    renderStudents(); renderAttendanceEditor(); renderSummary();
+    alert(`Imported ${imported.length} rows. ${added} added, ${replaced} replaced.`);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Hook up buttons
+$('btn-export-students').onclick = ()=> exportStudentsToExcel();
+$('btn-import-students').onclick = ()=> $('import-students-file').click();
+$('import-students-file').onchange = e => { const f = e.target.files[0]; if(!f) return; handleImportFile(f); e.target.value = ''; }
+
+// quick render/update
+renderStudents(); renderAttendanceEditor(); renderSummary();
+
+</script>
+</body>
+</html>
